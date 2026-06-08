@@ -33,13 +33,17 @@ test("readConfig requires every configuration value", () => {
 });
 
 test("readConfig treats whitespace-only values as missing", () => {
-  for (const name of Object.keys(validEnvironment)) {
-    const environment = { ...validEnvironment, [name]: "   " };
+  const whitespaceVariants = ["   ", "\t", "\n", " \t\n"];
 
-    assert.throws(
-      () => readConfig(environment),
-      new RegExp(`${name} is required`)
-    );
+  for (const name of Object.keys(validEnvironment)) {
+    for (const value of whitespaceVariants) {
+      const environment = { ...validEnvironment, [name]: value };
+
+      assert.throws(
+        () => readConfig(environment),
+        new RegExp(`${name} is required`)
+      );
+    }
   }
 });
 
