@@ -81,9 +81,16 @@ export async function checkDomain(
     }
 
     if (!response || !Number.isInteger(response.status)) {
+      const responseType = typeof response;
+      const status =
+        response && typeof response === "object"
+          ? String(response.status)
+          : "undefined";
+
       if (attempt === maxAttempts) {
         throw new Error(
-          `Nominet RDAP request failed after ${maxAttempts} attempts: invalid response`
+          `Nominet RDAP request failed after ${maxAttempts} attempts: ` +
+            `invalid response, type=${responseType}, status=${status}`
         );
       }
 

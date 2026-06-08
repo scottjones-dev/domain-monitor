@@ -32,6 +32,21 @@ test("readConfig requires every configuration value", () => {
   }
 });
 
+test("readConfig treats whitespace-only values as missing", () => {
+  const whitespaceVariants = ["   ", "\t", "\n", " \t\n"];
+
+  for (const name of Object.keys(validEnvironment)) {
+    for (const value of whitespaceVariants) {
+      const environment = { ...validEnvironment, [name]: value };
+
+      assert.throws(
+        () => readConfig(environment),
+        new RegExp(`${name} is required`)
+      );
+    }
+  }
+});
+
 test("readConfig normalizes valid configuration", () => {
   const config = readConfig({
     DOMAIN: "  PenRuddockeArms.CO.UK. ",
@@ -76,6 +91,24 @@ test("checkDomain classifies registered and available responses", async () => {
     requestedUrl,
     `https://rdap.nominet.uk/uk/domain/${validEnvironment.DOMAIN}`
   );
+});
+
+test("checkDomain encodes the domain and requests RDAP JSON", async () => {
+  let request;
+
+  await checkDomain("example name.co.uk", {
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return { status: 200 };
+    }
+  });
+
+  assert.equal(
+    request.url,
+    "https://rdap.nominet.uk/uk/domain/example%20name.co.uk"
+  );
+  assert.equal(request.options.headers.Accept, "application/rdap+json");
+  assert.ok(request.options.signal instanceof AbortSignal);
 });
 
 test("checkDomain rejects unexpected response statuses", async () => {
@@ -147,7 +180,7 @@ test("checkDomain retries malformed responses and never classifies them", async 
       },
       sleep: async () => {}
     }),
-    /Nominet RDAP request failed after 3 attempts: invalid response/
+    /Nominet RDAP request failed after 3 attempts: invalid response, type=object, status=undefined/
   );
 
   assert.equal(attempts, 3);
@@ -235,6 +268,23 @@ test("sendAvailabilityEmail times out stalled Resend requests", async () => {
       requestTimeoutMs: 5
     }),
     /Resend request timed out after 5ms/
+  );
+});
+
+test("sendAvailabilityEmail rethrows non-timeout Resend errors", async () => {
+  const networkError = new Error("network failure");
+  const resendClient = {
+    emails: {
+      send: async (_message, { signal }) => {
+        assert.equal(signal.aborted, false);
+        throw networkError;
+      }
+    }
+  };
+
+  await assert.rejects(
+    sendAvailabilityEmail(validEnvironment, { resendClient }),
+    (error) => error === networkError
   );
 });
 
