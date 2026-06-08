@@ -1,0 +1,16 @@
+{
+  "name": "domain-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node check-domain.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "resend": "^6.12.4"
+  }
+}
