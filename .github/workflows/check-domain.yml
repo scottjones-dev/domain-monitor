@@ -18,6 +18,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    environment: action
     timeout-minutes: 10
 
     steps:
