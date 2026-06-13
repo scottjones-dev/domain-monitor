@@ -228,7 +228,7 @@ test("fetchDomainRecord keeps RDAP details for registered domains", async () => 
   });
 
   assert.equal(record.status, "registered");
-  assert.equal(record.rdap, sampleRdapRecord);
+  assert.deepStrictEqual(record.rdap, sampleRdapRecord);
 });
 
 test("fetchDomainRecord does not require RDAP details for available domains", async () => {
