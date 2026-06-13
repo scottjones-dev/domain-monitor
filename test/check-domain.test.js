@@ -6,6 +6,8 @@ globalThis.fetch = async () => ({ status: 200 });
 
 const {
   checkDomain,
+  fetchDomainRecord,
+  formatDomainReport,
   readConfig,
   runMonitor,
   sendAvailabilityEmail
@@ -16,6 +18,130 @@ const validEnvironment = {
   ALERT_FROM_EMAIL: "alerts@example.com",
   ALERT_TO_EMAIL: "owner@example.com",
   RESEND_API_KEY: "re_test_key"
+};
+
+const sampleRdapRecord = {
+  handle: "D_79496860-UK",
+  ldhName: "penruddockearms.co.uk",
+  unicodeName: "penruddockearms.co.uk",
+  status: ["client hold", "pending delete", "redemption period", "server hold"],
+  links: [
+    {
+      rel: "self",
+      href: "https://rdap.nominet.uk/uk/domain/penruddockearms.co.uk"
+    }
+  ],
+  events: [
+    {
+      eventAction: "registration",
+      eventDate: "2023-03-25T12:10:54.421297Z"
+    },
+    {
+      eventAction: "last changed",
+      eventDate: "2026-03-25T05:21:14.786186Z"
+    },
+    {
+      eventAction: "expiration",
+      eventDate: "2026-03-25T12:10:54Z"
+    },
+    {
+      eventAction: "last update of RDAP database",
+      eventDate: "2026-06-13T08:35:04.517Z"
+    }
+  ],
+  nameservers: [
+    {
+      ldhName: "ns0.thundercloud.uk.",
+      ipAddresses: { v4: ["149.255.60.1"] }
+    },
+    {
+      ldhName: "ns1.thundercloud.uk.",
+      ipAddresses: { v4: ["185.53.57.60"] }
+    }
+  ],
+  secureDNS: {
+    maxSigLife: 3024000,
+    delegationSigned: false
+  },
+  entities: [
+    {
+      roles: ["registrar"],
+      publicIds: [{ type: "Registry Identifier", identifier: "LIVEDOMAINS" }],
+      vcardArray: [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", "Fasthosts Internet Ltd"],
+          ["url", {}, "uri", "https://www.fasthosts.co.uk"]
+        ]
+      ],
+      entities: [
+        {
+          roles: ["abuse"],
+          vcardArray: [
+            "vcard",
+            [
+              ["version", {}, "text", "4.0"],
+              ["fn", {}, "text", "Abuse contact"],
+              ["email", {}, "text", "misuse@fasthosts.co.uk"]
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      roles: ["registrant"],
+      status: ["validated"],
+      vcardArray: [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", ""],
+          ["email", {}, "text", "redacted@nominet.uk"]
+        ]
+      ],
+      remarks: [
+        {
+          title: "REDACTED FOR PRIVACY",
+          description: ["Some of the data in this object has been removed"]
+        },
+        {
+          title: "Data Quality",
+          description: [
+            "Name validated.",
+            "Address validated.",
+            "Nominet responsible for validation."
+          ]
+        }
+      ]
+    }
+  ],
+  redacted: [
+    {
+      name: { type: "Registrant Name" },
+      method: "emptyValue"
+    },
+    {
+      name: { type: "Registrant Organization" },
+      method: "removal"
+    },
+    {
+      name: { type: "Registrant Email" },
+      method: "replacementValue"
+    },
+    {
+      name: { type: "Registrant Phone" },
+      method: "removal"
+    }
+  ],
+  notices: [
+    {
+      title: "Status Codes",
+      description: [
+        "For more information on domain status codes, please visit https://icann.org/epp"
+      ]
+    }
+  ]
 };
 
 test("readConfig requires every configuration value", () => {
@@ -90,6 +216,87 @@ test("checkDomain classifies registered and available responses", async () => {
   assert.equal(
     requestedUrl,
     `https://rdap.nominet.uk/uk/domain/${validEnvironment.DOMAIN}`
+  );
+});
+
+test("fetchDomainRecord keeps RDAP details for registered domains", async () => {
+  const record = await fetchDomainRecord(validEnvironment.DOMAIN, {
+    fetchImpl: async () => ({
+      status: 200,
+      json: async () => sampleRdapRecord
+    })
+  });
+
+  assert.equal(record.status, "registered");
+  assert.equal(record.rdap, sampleRdapRecord);
+});
+
+test("fetchDomainRecord does not require RDAP details for available domains", async () => {
+  const record = await fetchDomainRecord(validEnvironment.DOMAIN, {
+    fetchImpl: async () => ({ status: 404 })
+  });
+
+  assert.deepEqual(record, {
+    status: "available",
+    rdap: null
+  });
+});
+
+test("formatDomainReport renders the main Nominet RDAP sections", () => {
+  const report = formatDomainReport(sampleRdapRecord);
+
+  assert.equal(
+    report,
+    `Domain Information
+Name: penruddockearms.co.uk
+Internationalized Domain Name: penruddockearms.co.uk
+Registry Domain ID: D_79496860-UK
+Domain Status:
+clientHold
+pendingDelete
+redemptionPeriod
+serverHold
+
+Nameservers:
+ns0.thundercloud.uk. : 149.255.60.1
+ns1.thundercloud.uk. : 185.53.57.60
+
+Dates
+Registry Expiration: 2026-03-25 12:10:54 UTC
+Updated: 2026-03-25 05:21:14 UTC
+Created: 2023-03-25 12:10:54 UTC
+
+Contact Information
+Registrant:
+Name: The RDAP server redacted the value
+Organization: The RDAP server redacted the value
+Email: redacted@nominet.uk (The RDAP server replaced the value stored in the database with a different value)
+Status: validated
+Phone: The RDAP server redacted the value
+REDACTED FOR PRIVACY:
+Some of the data in this object has been removed
+Data Quality:
+Name validated.
+Address validated.
+Nominet responsible for validation.
+
+Registrar Information
+Name: Fasthosts Internet Ltd
+IANA ID: LIVEDOMAINS
+URL: https://www.fasthosts.co.uk
+Abuse contact email: misuse@fasthosts.co.uk
+
+DNSSEC Information
+Max sig life: 3024000
+Delegation Signed: Unsigned
+
+Authoritative Servers
+Registry Server URL: https://rdap.nominet.uk/uk/domain/penruddockearms.co.uk
+Last updated from Registry RDAP DB: 2026-06-13T08:35:04.517Z
+
+Notices and Remarks
+Status Codes:
+For more information on domain status codes, please visit https://icann.org/epp`
   );
 });
 
@@ -305,6 +512,31 @@ test("runMonitor does not send email for a registered domain", async () => {
   assert.deepEqual(messages, [
     `${validEnvironment.DOMAIN} is still registered.`
   ]);
+});
+
+test("runMonitor logs the full RDAP report for registered domains", async () => {
+  let emailsSent = 0;
+  const messages = [];
+
+  const result = await runMonitor(validEnvironment, {
+    fetchDomainRecordImpl: async () => ({
+      status: "registered",
+      rdap: sampleRdapRecord
+    }),
+    sendEmailImpl: async () => {
+      emailsSent += 1;
+    },
+    logger: { log: (message) => messages.push(message) }
+  });
+
+  assert.equal(result, "registered");
+  assert.equal(emailsSent, 0);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /^Domain Information\nName: penruddockearms\.co\.uk/);
+  assert.match(
+    messages[0],
+    /Registrar Information\nName: Fasthosts Internet Ltd/
+  );
 });
 
 test("runMonitor sends one email for an available domain", async () => {
