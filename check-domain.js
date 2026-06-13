@@ -250,14 +250,21 @@ function appendRemarks(lines, remarks = []) {
   }
 }
 
+function formatDelegationSigned(secureDNS) {
+  if (typeof secureDNS?.delegationSigned !== "boolean") {
+    return "Not listed";
+  }
+
+  return secureDNS.delegationSigned ? "Signed" : "Unsigned";
+}
+
 export function formatDomainReport(record) {
   const registrar = findEntityByRole(record, "registrar");
   const registrant = findEntityByRole(record, "registrant");
   const abuseContact = findNestedEntityByRole(registrar, "abuse");
   const registryLink = record.links?.find((link) => link.rel === "self")?.href;
-  const updatedFromRegistry = findEventDate(
-    record,
-    "last update of RDAP database"
+  const updatedFromRegistry = formatRdapDate(
+    findEventDate(record, "last update of RDAP database")
   );
 
   const lines = [
@@ -314,13 +321,11 @@ export function formatDomainReport(record) {
     "",
     "DNSSEC Information",
     `Max sig life: ${record.secureDNS?.maxSigLife ?? "Not listed"}`,
-    `Delegation Signed: ${
-      record.secureDNS?.delegationSigned ? "Signed" : "Unsigned"
-    }`,
+    `Delegation Signed: ${formatDelegationSigned(record.secureDNS)}`,
     "",
     "Authoritative Servers",
     `Registry Server URL: ${registryLink ?? "Not listed"}`,
-    `Last updated from Registry RDAP DB: ${updatedFromRegistry ?? "Not listed"}`,
+    `Last updated from Registry RDAP DB: ${updatedFromRegistry}`,
     "",
     "Notices and Remarks"
   );
@@ -378,15 +383,12 @@ export async function sendAvailabilityEmail(
 export async function runMonitor(
   config,
   {
-    checkDomainImpl,
     fetchDomainRecordImpl = fetchDomainRecord,
     sendEmailImpl = sendAvailabilityEmail,
     logger = console
   } = {}
 ) {
-  const record = checkDomainImpl
-    ? { status: await checkDomainImpl(config.DOMAIN), rdap: null }
-    : await fetchDomainRecordImpl(config.DOMAIN);
+  const record = await fetchDomainRecordImpl(config.DOMAIN);
   const { status } = record;
 
   if (status === "registered") {

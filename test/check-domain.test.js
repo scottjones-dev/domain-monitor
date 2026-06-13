@@ -292,12 +292,21 @@ Delegation Signed: Unsigned
 
 Authoritative Servers
 Registry Server URL: https://rdap.nominet.uk/uk/domain/penruddockearms.co.uk
-Last updated from Registry RDAP DB: 2026-06-13T08:35:04.517Z
+Last updated from Registry RDAP DB: 2026-06-13 08:35:04 UTC
 
 Notices and Remarks
 Status Codes:
 For more information on domain status codes, please visit https://icann.org/epp`
   );
+});
+
+test("formatDomainReport distinguishes missing DNSSEC delegation from unsigned", () => {
+  const report = formatDomainReport({
+    ...sampleRdapRecord,
+    secureDNS: {}
+  });
+
+  assert.match(report, /Delegation Signed: Not listed/);
 });
 
 test("checkDomain encodes the domain and requests RDAP JSON", async () => {
@@ -500,7 +509,10 @@ test("runMonitor does not send email for a registered domain", async () => {
   const messages = [];
 
   const result = await runMonitor(validEnvironment, {
-    checkDomainImpl: async () => "registered",
+    fetchDomainRecordImpl: async () => ({
+      status: "registered",
+      rdap: null
+    }),
     sendEmailImpl: async () => {
       emailsSent += 1;
     },
@@ -544,7 +556,10 @@ test("runMonitor sends one email for an available domain", async () => {
   const messages = [];
 
   const result = await runMonitor(validEnvironment, {
-    checkDomainImpl: async () => "available",
+    fetchDomainRecordImpl: async () => ({
+      status: "available",
+      rdap: null
+    }),
     sendEmailImpl: async (config) => {
       emailConfig = config;
     },
@@ -563,7 +578,10 @@ test("runMonitor rejects ambiguous results without sending email", async () => {
 
   await assert.rejects(
     runMonitor(validEnvironment, {
-      checkDomainImpl: async () => "unknown",
+      fetchDomainRecordImpl: async () => ({
+        status: "unknown",
+        rdap: null
+      }),
       sendEmailImpl: async () => {
         emailsSent += 1;
       },
