@@ -43,7 +43,18 @@ export function readConfig(environment = process.env) {
 const delay = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-export async function checkDomain(
+async function readRdapJson(response) {
+  if (!response || typeof response.json !== "function") {
+    return null;
+  }
+
+  const body = await response.json();
+  return body && typeof body === "object" && !Array.isArray(body)
+    ? body
+    : null;
+}
+
+export async function fetchDomainRecord(
   domain,
   {
     fetchImpl = fetch,
@@ -99,11 +110,17 @@ export async function checkDomain(
     }
 
     if (response.status === 200) {
-      return "registered";
+      return {
+        status: "registered",
+        rdap: await readRdapJson(response)
+      };
     }
 
     if (response.status === 404) {
-      return "available";
+      return {
+        status: "available",
+        rdap: null
+      };
     }
 
     const temporaryFailure =
@@ -125,6 +142,201 @@ export async function checkDomain(
   }
 
   throw new Error("Nominet RDAP request failed");
+}
+
+export async function checkDomain(domain, options = {}) {
+  const record = await fetchDomainRecord(domain, options);
+  return record.status;
+}
+
+function findEntityByRole(record, role) {
+  return record.entities?.find((entity) => entity.roles?.includes(role));
+}
+
+function findNestedEntityByRole(entity, role) {
+  return entity?.entities?.find((nested) => nested.roles?.includes(role));
+}
+
+function findVcardValue(entity, name) {
+  const properties = entity?.vcardArray?.[1];
+
+  if (!Array.isArray(properties)) {
+    return null;
+  }
+
+  const property = properties.find(([propertyName]) => propertyName === name);
+  const value = property?.[3];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function findRedactedField(record, name) {
+  return record.redacted?.find((entry) => {
+    const entryName = entry.name?.type ?? entry.name?.description;
+    return entryName === name;
+  });
+}
+
+function redactedAwareValue(record, fieldName, value) {
+  const redaction = findRedactedField(record, fieldName);
+
+  if (value && redaction?.method === "replacementValue") {
+    return (
+      `${value} (` +
+      "The RDAP server replaced the value stored in the database with a different value)"
+    );
+  }
+
+  if (value) {
+    return value;
+  }
+
+  if (redaction) {
+    return "The RDAP server redacted the value";
+  }
+
+  return "Not listed";
+}
+
+function toEppStatus(status) {
+  return String(status)
+    .trim()
+    .split(/\s+/)
+    .map((word, index) =>
+      index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1)
+    )
+    .join("");
+}
+
+function formatRdapDate(value) {
+  if (!value) {
+    return "Not listed";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return `${date.toISOString().slice(0, 19).replace("T", " ")} UTC`;
+}
+
+function findEventDate(record, action) {
+  return record.events?.find((event) => event.eventAction === action)?.eventDate;
+}
+
+function nameserverAddress(nameserver) {
+  const addresses = [
+    ...(nameserver.ipAddresses?.v4 ?? []),
+    ...(nameserver.ipAddresses?.v6 ?? [])
+  ];
+
+  return addresses.length > 0 ? addresses.join(", ") : "No IP addresses listed";
+}
+
+function publicIdentifier(entity) {
+  return entity?.publicIds?.find((publicId) => publicId.identifier)?.identifier;
+}
+
+function appendRemarks(lines, remarks = []) {
+  for (const remark of remarks) {
+    if (remark.title) {
+      lines.push(`${remark.title}:`);
+    }
+
+    for (const description of remark.description ?? []) {
+      lines.push(description);
+    }
+  }
+}
+
+function formatDelegationSigned(secureDNS) {
+  if (typeof secureDNS?.delegationSigned !== "boolean") {
+    return "Not listed";
+  }
+
+  return secureDNS.delegationSigned ? "Signed" : "Unsigned";
+}
+
+export function formatDomainReport(record) {
+  const registrar = findEntityByRole(record, "registrar");
+  const registrant = findEntityByRole(record, "registrant");
+  const abuseContact = findNestedEntityByRole(registrar, "abuse");
+  const registryLink = record.links?.find((link) => link.rel === "self")?.href;
+  const updatedFromRegistry = formatRdapDate(
+    findEventDate(record, "last update of RDAP database")
+  );
+
+  const lines = [
+    "Domain Information",
+    `Name: ${record.ldhName ?? "Not listed"}`,
+    `Internationalized Domain Name: ${record.unicodeName ?? "Not listed"}`,
+    `Registry Domain ID: ${record.handle ?? "Not listed"}`,
+    "Domain Status:"
+  ];
+
+  const statuses = record.status?.length
+    ? record.status.map(toEppStatus)
+    : ["Not listed"];
+  lines.push(...statuses);
+
+  lines.push("", "Nameservers:");
+  const nameservers = record.nameservers?.length ? record.nameservers : [];
+
+  if (nameservers.length === 0) {
+    lines.push("Not listed");
+  } else {
+    for (const nameserver of nameservers) {
+      lines.push(
+        `${nameserver.ldhName ?? nameserver.unicodeName ?? "Not listed"} : ${nameserverAddress(nameserver)}`
+      );
+    }
+  }
+
+  lines.push(
+    "",
+    "Dates",
+    `Registry Expiration: ${formatRdapDate(findEventDate(record, "expiration"))}`,
+    `Updated: ${formatRdapDate(findEventDate(record, "last changed"))}`,
+    `Created: ${formatRdapDate(findEventDate(record, "registration"))}`,
+    "",
+    "Contact Information",
+    "Registrant:",
+    `Name: ${redactedAwareValue(record, "Registrant Name", findVcardValue(registrant, "fn"))}`,
+    `Organization: ${redactedAwareValue(record, "Registrant Organization", findVcardValue(registrant, "org"))}`,
+    `Email: ${redactedAwareValue(record, "Registrant Email", findVcardValue(registrant, "email"))}`,
+    `Status: ${registrant?.status?.join(", ") ?? "Not listed"}`,
+    `Phone: ${redactedAwareValue(record, "Registrant Phone", findVcardValue(registrant, "tel"))}`
+  );
+
+  appendRemarks(lines, registrant?.remarks);
+
+  lines.push(
+    "",
+    "Registrar Information",
+    `Name: ${findVcardValue(registrar, "fn") ?? "Not listed"}`,
+    `IANA ID: ${publicIdentifier(registrar) ?? "Not listed"}`,
+    `URL: ${findVcardValue(registrar, "url") ?? "Not listed"}`,
+    `Abuse contact email: ${findVcardValue(abuseContact, "email") ?? "Not listed"}`,
+    "",
+    "DNSSEC Information",
+    `Max sig life: ${record.secureDNS?.maxSigLife ?? "Not listed"}`,
+    `Delegation Signed: ${formatDelegationSigned(record.secureDNS)}`,
+    "",
+    "Authoritative Servers",
+    `Registry Server URL: ${registryLink ?? "Not listed"}`,
+    `Last updated from Registry RDAP DB: ${updatedFromRegistry}`,
+    "",
+    "Notices and Remarks"
+  );
+
+  appendRemarks(lines, record.notices);
+
+  if (lines.at(-1) === "Notices and Remarks") {
+    lines.push("None listed");
+  }
+
+  return lines.join("\n");
 }
 
 export async function sendAvailabilityEmail(
@@ -171,15 +383,20 @@ export async function sendAvailabilityEmail(
 export async function runMonitor(
   config,
   {
-    checkDomainImpl = checkDomain,
+    fetchDomainRecordImpl = fetchDomainRecord,
     sendEmailImpl = sendAvailabilityEmail,
     logger = console
   } = {}
 ) {
-  const status = await checkDomainImpl(config.DOMAIN);
+  const record = await fetchDomainRecordImpl(config.DOMAIN);
+  const { status } = record;
 
   if (status === "registered") {
-    logger.log(`${config.DOMAIN} is still registered.`);
+    logger.log(
+      record.rdap
+        ? formatDomainReport(record.rdap)
+        : `${config.DOMAIN} is still registered.`
+    );
     return status;
   }
 

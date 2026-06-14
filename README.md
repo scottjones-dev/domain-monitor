@@ -1,8 +1,8 @@
 # Domain Monitor
 
 This repository checks `penruddockearms.co.uk` against the Nominet RDAP
-service every hour. If the domain appears to be available, it sends an email
-through Resend.
+service every hour. Registered domains produce a full RDAP report in the run
+log. If the domain appears to be available, it sends an email through Resend.
 
 The monitored domain is fixed as `penruddockearms.co.uk` in
 `.github/workflows/check-domain.yml`.
@@ -53,6 +53,12 @@ To run it immediately:
 2. Select **Check Domain**.
 3. Select **Run workflow**.
 
+When Nominet RDAP reports that the domain is registered, the run log includes
+sections for domain information, nameservers, dates, registrant contact
+redaction details, registrar information, DNSSEC, authoritative RDAP server
+details, and notices or remarks. The availability email is still sent only when
+Nominet RDAP returns an available-domain response.
+
 ## Local development
 
 Install dependencies and run the tests:
@@ -72,5 +78,5 @@ $env:RESEND_API_KEY = "re_your_api_key"
 npm run check
 ```
 
-The local check sends an email only when Nominet RDAP reports the domain as
-available.
+The local check prints the same full RDAP report for registered domains and
+sends an email only when Nominet RDAP reports the domain as available.
